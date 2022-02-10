@@ -1,141 +1,66 @@
 using LinearAlgebra
 using Plots
-#Integration de f entre a et b avec une division n.
-
-function Riemman(f,a,b,n)
-    dx = (b-a)/float(n)
-    Rf = 0
-    for i in 0:n-1
-        Rf += f(a + i*dx) * dx
-    end
-    return Rf
-end
-
-#Verifications
-
-println(Riemman(x->x,0,1,100))
-println(Riemman(x->exp(2im*pi*x) ,0,1,1000))
-
-#Operateur produit entre deux fonctions
-function Op_produit(f,g)
-    return (x -> f(x)*g(x))
-end
-
-#Operateur produit entre une fonction f est un scalaire a
-function Op_produit_s(a,f)
-    return (x -> a*f(x))
-end
-
-
-#Operateur somme entre deux fonctions
-function Op_somme(f,g)
-    return (x -> f(x) + g(x))
-end
-
-
-#Renvoie le conjugué d'une fonction
-function conj_f(f)
-    return (x -> conj(f(x)))
-end
-
-#Fait le calcul 2*2
-println(Op_produit(x->x,x->x)(2))
-
-#Produit scalaire L^2([a,b]) entre f et g avec un pas n par une somme de Riemman
-function ps_Riemman(a,b,f,g,n)
-    return Riemman(Op_produit(conj_f(f),g),a,b,n)
-end
-
-println(ps_Riemman(0,1,(x->x),(x->1),100))
-
-function e_n(n,L)
-    return (x->(1/sqrt(L))*exp(2im * pi * x *n/L))
-end
-
-
-#Doit renvoyer exp(2i pi) = 1
-println(e_n(1,1)(1))
-
-#On renvoie le coefficient de fourier associé à en(x) = 1/sqrt(L) * exp(2ipi nx/L), base de L^2([-L/2,L/2]) avec un pas N
-function coef_fourier(L,n,f,N)
-    return ps_Riemman(-L/2.,L/2.,e_n(n,L),f,N)
-end
-
-#Doit renvoyer 0
-println(coef_fourier(1,1,e_n(2,1),100))
-
-#Prend une fonction et renvoie ses coordonées dans la famille BK = Vect{e_n(k,L)   |k| <= K} calculs integrales
-#fait avec un pas n
-function Vect_fourier(K,L,f,N)
-    cfF = [coef_fourier(L,-K + i,f,N) for i in 0:(2*K)]
-    return cfF
-end
-
-#Doit renvoyer [0,0,0,1,0]
-a = Vect_fourier(2,1,e_n(1,1),100)
-println(Vect_fourier(2,1,e_n(1,1),100))
-
-#Prend un vecteur de la famille BK = Vect{e_n(k,L)   |k| <= K} et renvoie la fonction associée
-function fonc_fourier(cfF, L)
-    K = length(cfF)
-    K = (K-1)/2
-    s = (x -> 0)
-    for i in 1:Int64(2*K+1)
-        s = Op_somme(s,Op_produit_s(cfF[i],e_n(-K + i-1,L)))
-    end
-    return s
-end
-
-#On doit trouver exp(2i pi) = 1
-fonc_fourier(a,1)(1)
 
 alpha = 10
 zeta = 10
+
 #Largeur du puit
 L = 1.
 #Tronquage de la base de fourier
-K = 100
-#Hamiltonier
+K = 1000
+#Hamiltonien
 H = Matrix(0.0im*I,2K+1,2K+1)
-
-function v(x)
-    return -alpha*exp(-zeta*x*x)
-end
-
 
 for i in 1:(2*K+1)
     H[i,i] = 4*pi*pi*(-K+i-1)*(-K+i-1)/(L*L)
 end
 
-#Bien vérifier la symétrie de la diagonale
-#println(H)
+#Vecteur de fourier
+function e_n(n,L,x)
+    (1/sqrt(L))*cis(2* pi * x *n/L)
+end
 
-#On utilise le caractére Hamiltonien de H pour diminuer par deux les calculs
-#Ici le code n'est pas optimisé, car on utilise pas la relation <ek,Vep> = c{k-p}(v)/sqrt{L}
+#Potentiel
+function v(x)
+    -alpha*exp(-zeta*x*x)
+end
+
+#Transformée de fourier de v
+
+function Fv(x)
+    alpha * sqrt(pi/zeta) * exp(-x*x/(4*zeta))
+end
+
+
+#Prend un vecteur de la famille BK = Vect{e_n(k,L)   |k| <= K} et renvoie la fonction associée évaluée en x
+function fonc_fourier(cfF, L, x)
+    K = length(cfF)
+    K = (K-1)/2
+    sum(cfF[i]*e_n(-K+i -1, L, x) for i in 1:Int64(2*K+1))
+end
+
+#H_k,p = <ek,Vep> = c{k-p}(v)/sqrt{L}
 for i in 1:(2*K+1)
-    for j in 1:i
-        co = coef_fourier(L,i,Op_produit(v,e_n(j,L)),1000)
+    for j in 1:(2*K+1)
+        co = Fv(2*pi*(i-j)/L)/L
         H[i,j] += co
-        if !(i == j)
-            H[j,i] += conj(co)
-        end
     end
 end
 
 #Bien vérifier le caractére Hamiltonien
 H
 
+
 Sol = eigvecs(H)
 
 #psi ~sum sol1[k]*e(-Kmax + k -1) pour i allant de 0 à 2Kmax +1
 
 #On trace les différents modes.
-function Trace_sol(k)
+function Trace_sol(k,n)
     sol = [Sol[i,k] for i in 1:(2K+1)]
-    psi = fonc_fourier(sol,L)
-    plot(Op_somme(x->-1,Op_produit(conj_f(psi),psi)),-L/2,L/2)
+    X = [i*L/n - L/2 for i in 0:n]
+    plot(x -> abs2(fonc_fourier(sol,L,x)),X)
     plot!(v)
 end
 
-
-Trace_sol(1)
+Trace_sol(2,1000)
