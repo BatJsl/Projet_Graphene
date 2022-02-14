@@ -1,66 +1,168 @@
-using LinearAlgebra
 using Plots
 
 alpha = 10
-zeta = 10
 
-#Largeur du puit
-L = 1.
-#Tronquage de la base de fourier
-K = 1000
-#Hamiltonien
-H = Matrix(0.0im*I,2K+1,2K+1)
-
-for i in 1:(2*K+1)
-    H[i,i] = 4*pi*pi*(-K+i-1)*(-K+i-1)/(L*L)
+function Vpotentiel(x)
+  -exp(-alpha*(x-(1/2))^2)
 end
 
-#Vecteur de fourier
-function e_n(n,L,x)
-    (1/sqrt(L))*cis(2* pi * x *n/L)
+function eval(f,N)
+  x = [i for i in 0:(N-1)]
+  x = x./N
+  y = f.(x)
 end
 
-#Potentiel
-function v(x)
-    -alpha*exp(-zeta*x*x)
+function funcreel(f)
+  function g(x)
+    real(f(x))
+  end
 end
 
-#Transformée de fourier de v
-
-function Fv(x)
-    alpha * sqrt(pi/zeta) * exp(-x*x/(4*zeta))
-end
-
-
-#Prend un vecteur de la famille BK = Vect{e_n(k,L)   |k| <= K} et renvoie la fonction associée évaluée en x
-function fonc_fourier(cfF, L, x)
-    K = length(cfF)
-    K = (K-1)/2
-    sum(cfF[i]*e_n(-K+i -1, L, x) for i in 1:Int64(2*K+1))
-end
-
-#H_k,p = <ek,Vep> = c{k-p}(v)/sqrt{L}
-for i in 1:(2*K+1)
-    for j in 1:(2*K+1)
-        co = Fv(2*pi*(i-j)/L)/L
-        H[i,j] += co
+function fftrec(y)
+  n=length(y)
+  if n == 1
+    return y
+  else
+    omega = exp(-2*pi*1im/n)
+    y1 = ones(n÷2).+ 0im
+    y2 = ones(n÷2).+ 0im
+    for j in 1:(n÷2)
+      y1[j] = y[2*j-1]
+      y2[j] = y[2*j]
+  end
+    c1 = fftrec(y1)
+    c2 = fftrec(y2)
+    c = ones(n).+ 0im
+    for j in 1:(n÷2)
+      c[j] = c1[j]+(omega^(j-1))*c2[j]
+      c[j+n÷2] = c1[j]-(omega^(j-1))*c2[j]
     end
+    return c
+  end
 end
 
-#Bien vérifier le caractére Hamiltonien
-H
-
-
-Sol = eigvecs(H)
-
-#psi ~sum sol1[k]*e(-Kmax + k -1) pour i allant de 0 à 2Kmax +1
-
-#On trace les différents modes.
-function Trace_sol(k,n)
-    sol = [Sol[i,k] for i in 1:(2K+1)]
-    X = [i*L/n - L/2 for i in 0:n]
-    plot(x -> abs2(fonc_fourier(sol,L,x)),X)
-    plot!(v)
+function fft(f,K)
+  N = 2^K
+  y = eval(f,N)
+  c = (1/N).*fftrec(y)
+  cn = zeros(N+1) .+ 0.0im
+  for i in 1:N÷2
+    cn[i+N÷2] =c[i]
+    cn[i]=c[N÷2+i]
+  end
+  cn[N+1]=conj(cn[1])
+  cn
 end
 
-Trace_sol(2,1000)
+function fft(y::Vector{ComplexF64},K)
+  N = 2^K
+  c = (1/N).*fftrec(y)
+  cn = zeros(N+1) .+ 0.0im
+  for i in 1:N÷2
+    cn[i+N÷2] =c[i]
+    cn[i]=c[N÷2+i]
+  end
+  cn[N+1]=conj(cn[1])
+  cn
+end
+
+function invfftrec(y)
+  n = length(y)
+  if n == 1
+    return y
+  else
+    omega = exp(2*pi*1im/n)
+    y1 = ones(n÷2).+ 0im
+    y2 = ones(n÷2).+ 0im
+    for j in 1:(n÷2)
+      y1[j] = y[2*j-1]
+      y2[j] = y[2*j]
+    end
+    c1 = invfftrec(y1)
+    c2 = invfftrec(y2)
+    c = ones(n).+ 0im
+    for j in 1:(n÷2)
+      c[j] = c1[j]+(omega^(j-1))*c2[j]
+      c[j+n÷2] = c1[j]-(omega^(j-1))*c2[j]
+    end
+    return c
+  end
+end
+
+function invfft(cn)
+  N = length(cn)-1
+  c = ones(N).+ 0im
+  for i in 1:N÷2
+    c[i]=cn[i+N÷2]
+    c[N÷2+i]=cn[i]
+  end
+  invfftrec(c)
+end
+
+# tableau des coef de fourier de -2^(K-1) à 2^(K-1)
+
+function ei(k)
+  function a(x)
+    exp(1im*2*pi*k*x)
+  end
+  a
+end
+
+function cosinus(x)
+  cos(2*pi*x)
+end
+
+#H pour fonction continue
+function H(psi,V,k)
+  lambda = fft(psi,k)
+  laplacien = [4*(pi^2)*((-2^(k-1)+i)^2) for i in 0:(2^k)]
+  lapllambda = lambda .* laplacien
+  function f(x)
+    exposant = [ei(-2^(k-1)+i)(x) for i in 0:(2^k)]
+    laplamexp = lapllambda .* exposant
+    return(V(x)*psi(x)+sum(laplamexp) )
+  end
+  f
+end
+
+#algo en théorie en kln(k)
+# Calcul de H|\psi en fft
+
+function FHF(fftpsi,V,k)
+  N = 2^k
+  laplacien = [4*(pi^2)*((-2^(k-1)+i)^2) for i in 0:N]
+  lapfftpsi = fftpsi .* laplacien
+  Veval = eval(V,N)
+  psieval = invfft(fftpsi)
+  Vpsieval = Veval.*psieval
+  Vpsifft = fft(Vpsieval,k)
+  lapfftpsi.+Vpsifft
+end
+
+#calcul la puissance 2^puiss de H
+function FHFpuiss(fftpsi,V,k,puiss)
+  if (puiss==1)
+    return(FHF(fftpsi,V,k))
+  else
+    FHFpuiss(FHFpuiss(fftpsi,V,k,puiss-1),V,k,puiss-1)
+  end
+end
+
+function coeftofunc(cn)
+  N = length(cn)-1
+  function f(x)
+    exposant = [ei(-N÷2+i)(x) for i in 0:N]
+    evaluation = cn .* exposant
+    sum(evaluation)
+  end
+  f
+end
+
+function normalise(f,k)
+  cn = fft(f,k)
+  norm = cn'cn
+  function g(x)
+    f(x)/sqrt(real(norm))
+  end
+  g
+end
