@@ -1,168 +1,53 @@
 using Plots
+using FFTW
+using KrylovKit
 
-alpha = 10
-
-function Vpotentiel(x)
-  -exp(-alpha*(x-(1/2))^2)
+#Nos paramétres
+struct parameters
+    Kmax
+    σ
+    L
 end
 
-function eval(f,N)
-  x = [i for i in 0:(N-1)]
-  x = x./N
-  y = f.(x)
-end
+P = parameters(100.,0.01,1)
 
-function funcreel(f)
-  function g(x)
-    real(f(x))
-  end
-end
+#[0,1,2,3,......Kmax,-1,-2,.....]
+Ii =  P.Kmax*2 .* fftfreq(Int64(2*P.Kmax))
 
-function fftrec(y)
-  n=length(y)
-  if n == 1
-    return y
-  else
-    omega = exp(-2*pi*1im/n)
-    y1 = ones(n÷2).+ 0im
-    y2 = ones(n÷2).+ 0im
-    for j in 1:(n÷2)
-      y1[j] = y[2*j-1]
-      y2[j] = y[2*j]
-  end
-    c1 = fftrec(y1)
-    c2 = fftrec(y2)
-    c = ones(n).+ 0im
-    for j in 1:(n÷2)
-      c[j] = c1[j]+(omega^(j-1))*c2[j]
-      c[j+n÷2] = c1[j]-(omega^(j-1))*c2[j]
-    end
-    return c
-  end
-end
+Δ = (X -> (4*pi^2/P.L^2) .* X .* (Ii .^2))
 
-function fft(f,K)
-  N = 2^K
-  y = eval(f,N)
-  c = (1/N).*fftrec(y)
-  cn = zeros(N+1) .+ 0.0im
-  for i in 1:N÷2
-    cn[i+N÷2] =c[i]
-    cn[i]=c[N÷2+i]
-  end
-  cn[N+1]=conj(cn[1])
-  cn
-end
+#L'abscisse
+x = [i*P.L / (2*P.Kmax) - P.L/2 for i in 0:(2*Int64(P.Kmax)-1)]
+#println(x)
 
-function fft(y::Vector{ComplexF64},K)
-  N = 2^K
-  c = (1/N).*fftrec(y)
-  cn = zeros(N+1) .+ 0.0im
-  for i in 1:N÷2
-    cn[i+N÷2] =c[i]
-    cn[i]=c[N÷2+i]
-  end
-  cn[N+1]=conj(cn[1])
-  cn
-end
+#Le potentiel
+V = - exp.( - (x .^2) ./ P.σ)
 
-function invfftrec(y)
-  n = length(y)
-  if n == 1
-    return y
-  else
-    omega = exp(2*pi*1im/n)
-    y1 = ones(n÷2).+ 0im
-    y2 = ones(n÷2).+ 0im
-    for j in 1:(n÷2)
-      y1[j] = y[2*j-1]
-      y2[j] = y[2*j]
-    end
-    c1 = invfftrec(y1)
-    c2 = invfftrec(y2)
-    c = ones(n).+ 0im
-    for j in 1:(n÷2)
-      c[j] = c1[j]+(omega^(j-1))*c2[j]
-      c[j+n÷2] = c1[j]-(omega^(j-1))*c2[j]
-    end
-    return c
-  end
-end
+#La transformée de fourier du potentiel
+FV = fft(V)
 
-function invfft(cn)
-  N = length(cn)-1
-  c = ones(N).+ 0im
-  for i in 1:N÷2
-    c[i]=cn[i+N÷2]
-    c[N÷2+i]=cn[i]
-  end
-  invfftrec(c)
-end
+#Convolée avec la transformée de fourier de V
+CFV = (X -> fft(ifft(X) .* V))
 
-# tableau des coef de fourier de -2^(K-1) à 2^(K-1)
+#L'hamiltonien
+H = (X -> -Δ(X) + CFV(X))
 
-function ei(k)
-  function a(x)
-    exp(1im*2*pi*k*x)
-  end
-  a
-end
+#Un vecteur pour krylov
+ii = [1 for i in 1:2*P.Kmax]
 
-function cosinus(x)
-  cos(2*pi*x)
-end
+#La résolution
+(E,VP) = eigsolve(H,ii)
 
-#H pour fonction continue
-function H(psi,V,k)
-  lambda = fft(psi,k)
-  laplacien = [4*(pi^2)*((-2^(k-1)+i)^2) for i in 0:(2^k)]
-  lapllambda = lambda .* laplacien
-  function f(x)
-    exposant = [ei(-2^(k-1)+i)(x) for i in 0:(2^k)]
-    laplamexp = lapllambda .* exposant
-    return(V(x)*psi(x)+sum(laplamexp) )
-  end
-  f
-end
+#La solution
+Npsi = sqrt(sum(conj.(VP[1]) .* VP[1]))
+println(Npsi)
+psi = ifft(VP[1])./ Npsi
 
-#algo en théorie en kln(k)
-# Calcul de H|\psi en fft
+println(E)
+#println(VP)
 
-function FHF(fftpsi,V,k)
-  N = 2^k
-  laplacien = [4*(pi^2)*((-2^(k-1)+i)^2) for i in 0:N]
-  lapfftpsi = fftpsi .* laplacien
-  Veval = eval(V,N)
-  psieval = invfft(fftpsi)
-  Vpsieval = Veval.*psieval
-  Vpsifft = fft(Vpsieval,k)
-  lapfftpsi.+Vpsifft
-end
+#plot(0:(2*Int64(P.Kmax) - 1), real.(ifft(cos.(2*pi .*x))) )
 
-#calcul la puissance 2^puiss de H
-function FHFpuiss(fftpsi,V,k,puiss)
-  if (puiss==1)
-    return(FHF(fftpsi,V,k))
-  else
-    FHFpuiss(FHFpuiss(fftpsi,V,k,puiss-1),V,k,puiss-1)
-  end
-end
-
-function coeftofunc(cn)
-  N = length(cn)-1
-  function f(x)
-    exposant = [ei(-N÷2+i)(x) for i in 0:N]
-    evaluation = cn .* exposant
-    sum(evaluation)
-  end
-  f
-end
-
-function normalise(f,k)
-  cn = fft(f,k)
-  norm = cn'cn
-  function g(x)
-    f(x)/sqrt(real(norm))
-  end
-  g
-end
+plot(x,real.(conj.(psi) .* psi))
+#plot!(x,V)
+#plot!(x,real.(ifft(VP[1])))
