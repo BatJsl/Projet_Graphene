@@ -2,52 +2,62 @@ using Plots
 using FFTW
 using KrylovKit
 
-#Nos paramétres
-struct parameters
+#Nos paramétre
+struct parameters_2D
     Kmax
     σ
-    L
+    Lx
+    Ly
 end
 
-P = parameters(100.,0.01,1)
+P_2D = parameters_2D(100.,1.,1.,1.)
 
-#[0,1,2,3,......Kmax,-1,-2,.....]
-Ii =  P.Kmax*2 .* fftfreq(Int64(2*P.Kmax))
+function Vpotentiel(x,y)
+    -exp(-(x-0.5)^2/P_2D.σ)*exp(-(y-0.5)^2/P_2D.σ)
+end
 
-Δ = (X -> (4*pi^2/P.L^2) .* X .* (Ii .^2))
+function f(x,y)
+    cos(2*pi*x)+sin(2*pi*y)
+end
 
-#L'abscisse
-x = [i*P.L / (2*P.Kmax) - P.L/2 for i in 0:(2*Int64(P.Kmax)-1)]
-#println(x)
+function evaluation(f)
+    eval = zeros((Int64(2*P_2D.Kmax)),(Int64(2*P_2D.Kmax)))
+    for i in 1:(Int64(2*P_2D.Kmax))
+        for j in 1:(Int64(2*P_2D.Kmax))
+            eval[i,j] = f((j-1)/(2*P_2D.Kmax),(i-1)/(2*P_2D.Kmax))
+        end
+    end
+    eval
+end
 
-#Le potentiel
-V = - exp.( - (x .^2) ./ P.σ)
+V = evaluation(Vpotentiel)
+kx =  P_2D.Kmax*2 .* fftfreq(Int64(2*P_2D.Kmax))
 
-#La transformée de fourier du potentiel
-FV = fft(V)
+Ii = zeros(Int64(2*P_2D.Kmax),Int64(2*P_2D.Kmax))
+for i in 1:Int64(2*P_2D.Kmax)
+    for j in 1:Int64(2*P_2D.Kmax)
+        Ii[i,j]=kx[i]^2+kx[j]^2
+    end
+end
 
-#Convolée avec la transformée de fourier de V
+a = evaluation(f)
+
+Δ = (X -> (4*pi^2 .* X .* Ii))
+
 CFV = (X -> fft(ifft(X) .* V))
 
-#L'hamiltonien
-H = (X -> -Δ(X) + CFV(X))
+H = (X -> Δ(X) + CFV(X))
 
-#Un vecteur pour krylov
-ii = [1 for i in 1:2*P.Kmax]
+ii = ones((Int64(2*P_2D.Kmax)),(Int64(2*P_2D.Kmax)))
 
 #La résolution
-(E,VP) = eigsolve(H,ii)
+res = eigsolve(H,ii,4,:SR)
 
-#La solution
-Npsi = sqrt(sum(conj.(VP[1]) .* VP[1]))
-println(Npsi)
-psi = ifft(VP[1])./ Npsi
+(E,VP) = res
 
 println(E)
-#println(VP)
 
+x = [i*P_2D.Lx / (2*P_2D.Kmax) for i in 0:(2*Int64(P_2D.Kmax)-1)]
+y = [i*P_2D.Lx / (2*P_2D.Kmax) for i in 0:(2*Int64(P_2D.Kmax)-1)]
 #plot(0:(2*Int64(P.Kmax) - 1), real.(ifft(cos.(2*pi .*x))) )
-
-plot(x,real.(conj.(psi) .* psi))
-#plot!(x,V)
-#plot!(x,real.(ifft(VP[1])))
+surface(x,y,real.(conj.(ifft(VP[1])) .* ifft(VP[1])))
